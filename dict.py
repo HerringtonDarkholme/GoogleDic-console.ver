@@ -56,15 +56,25 @@ TERM_FORMAT = {
     'synonym'  : _COLOR['blue'],
     'index': _COLOR['red']
 }
-OPTIONS = {}
 
-def fmt_text(text, fmt='none'):
-    """fmt_text(text, fmt) -> string
-    """
-    if OPTIONS.get('no_fmt') or not TERM_FORMAT.has_key(fmt):
-        return text
-    return '%s%s%s'% (TERM_FORMAT[fmt], text, TERM_FORMAT['close'])
+class Fmt(object):
+    """quick way for format"""
+    def __init__(self, **opts):
+        """options for format"""
+        super(Fmt, self).__init__()
+        self.options = opts
 
+    def __getattr__(self, color):
+        opts = self.options
+        if opts.get('no_fmt') or color not in TERM_FORMAT:
+            return lambda text: text
+        if not opts.get(color, 1):
+            return lambda text: text
+
+        return lambda text:\
+                '%s%s%s'% (TERM_FORMAT[color], text, TERM_FORMAT['close'])
+
+FMT = Fmt(**{})
 
 def print_def(word):
     """format definition of word
@@ -115,18 +125,18 @@ def terms(term_list, ent_type):
         for term in term_list:
             label = term.get('labels', [{}])[0]
             label = label.get('text', '')
-            text = '%s %s'% (term['text'], fmt_text(label, 'related'))
+            text = '%s %s'% (term['text'], FMT.related(label))
             ret.append(text)
     elif ent_type == 'example':
         separator = '\n'
-        repl = lambda t: fmt_text(t.group(1), 'example')
+        repl = lambda t: FMT.example(t.group(1))
         for term in term_list:
             text = term['text']
             text = re.sub(r'<em>(.*?)</em>', repl, text)
-            ret.append(' '*4 + text)
+            ret.append(' * '+ text)
     elif ent_type == 'headword':
         word = term_list[0]
-        text = '\n' + fmt_text(word['text'], 'headword')
+        text = '\n' + FMT.headword(word['text'])
         ret.append(text)
         ret.append(' '+word['labels'][0]['text'])
         term_list = term_list[1:]
@@ -158,12 +168,12 @@ def entry(ent, index=0):
     term_text = terms(term_list, ent_type)
     if ent_type == 'meaning' and index:
         term_text = '  {0}: {1}'.format(\
-                fmt_text(str(index), 'index'),  term_text)
+                FMT.index(str(index)),  term_text)
     ret.append(term_text)
     entries = ent.get('entries', [])
     if ent_type == 'synonym':
         label = ent['labels'][0]['text']
-        ret.append(fmt_text(label+': ', 'synonym'))
+        ret.append(FMT.synonym(label+': '))
     for num, child in enumerate(entries):
         if ent_type == 'synonyms':
             child['type'] = 'synonym'
@@ -176,12 +186,12 @@ def format_output(dfn):
     """format_output(definition) -> string
     """
     ret = []
-    if 'primaries' in dfn:
-        ret.extend([entry(ent) for ent in dfn['primaries']])
     if 'synonyms' in dfn:
         for ent in dfn['synonyms']:
             ent['type'] = 'synonym'
             ret.append(entry(ent))
+    if 'primaries' in dfn:
+        ret.extend([entry(ent) for ent in dfn['primaries']])
 
     return ''.join(ret)
 
