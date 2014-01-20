@@ -4,7 +4,9 @@
 from __future__ import print_function
 from __future__ import unicode_literals
 import sys
+import os
 import re
+from textwrap import fill
 from urllib2 import urlopen, URLError
 from ast import literal_eval
 reload(sys)
@@ -34,6 +36,8 @@ _COLOR = {
     'd_magenta' : "\033[35;2m",
     'd_cyan'    : "\033[36;2m",
     'd_white'   : "\033[37;2m",
+    'b_cyan'      : "\033[36;1m",
+    'b_green'     : "\033[32;1m",
 
     'on_black'   : "\033[40m",
     'on_red'     : "\033[41m",
@@ -50,10 +54,13 @@ _COLOR = {
 TERM_FORMAT = {
     'none'     : "",
     'close'    : "\033[0m",
-    'headword' : _COLOR['bold'],
+    'headword' : _COLOR['b_cyan'],
+    'label' : _COLOR['bold'],
     'related'  : _COLOR['d_white'],
-    'example'  : _COLOR['underline'],
+    'meaning'  : _COLOR['yellow'],
+    'highlight'  : _COLOR['underline'],
     'synonym'  : _COLOR['blue'],
+    'item': _COLOR['b_green'],
     'index': _COLOR['red']
 }
 
@@ -99,8 +106,6 @@ def get_def(word):
     except URLError as err:
         print('Error in open url')
         print(err)
-    else:
-        print('what')
     finally:
         #explicitly close it
         def_source.close()
@@ -119,7 +124,13 @@ def terms(term_list, ent_type):
 
     if ent_type == 'meaning':
         separator = '\n'
-        ret = [term['text'] for term in term_list]
+        for term in term_list:
+            text = term['text']
+            text = re.sub(r'<em>(.*?)</em>', '\1', text)
+            text = re.sub(r'<i>(.*?)</i>', '\1', text)
+            text = fill(text, subsequent_indent=' '*7)
+            ret.append(FMT.meaning(text))
+
     elif ent_type == 'related':
         separator = ', '
         for term in term_list:
@@ -127,22 +138,35 @@ def terms(term_list, ent_type):
             label = label.get('text', '')
             text = '%s %s'% (term['text'], FMT.related(label))
             ret.append(text)
+        ret[0] = '    ' + ret[0]
+        if len(ret) > 2: #break long
+            ret[2] = '\n    ' + ret[2]
+
     elif ent_type == 'example':
         separator = '\n'
-        repl = lambda t: FMT.example(t.group(1))
+        repl = lambda t: FMT.highlight(t.group(1))
         for term in term_list:
             text = term['text']
             text = re.sub(r'<em>(.*?)</em>', repl, text)
-            ret.append(' * '+ text)
+            text = re.sub(r'<b>(.*?)</b>', '\1', text)
+            text = ' '*8 + '%s %s' % (FMT.item('*'), text)
+            # add max width for escaped width
+            text = fill(text, width = 90, \
+                    subsequent_indent=' '*10)
+            ret.append(text)
+
     elif ent_type == 'headword':
         word = term_list[0]
-        text = '\n' + FMT.headword(word['text'])
+        text = '\n\n  ' + FMT.headword(word['text'])
         ret.append(text)
-        ret.append(' '+word['labels'][0]['text'])
+        if 'labels' in word:
+            label = word['labels'][0]['text']
+            ret.append(' '+FMT.label(label))
         term_list = term_list[1:]
         separator = ' | '
         ret.extend([term['text'] for term in term_list\
                 if term['type'] != 'sound'])
+
     elif ent_type == 'synonym':
         separator = ', '
         ret = [term['text'] for term in term_list]
@@ -166,8 +190,8 @@ def entry(ent, index=0):
     ent_type = ent.get('type', '')
     term_list = ent.get('terms', [])
     term_text = terms(term_list, ent_type)
-    if ent_type == 'meaning' and index:
-        term_text = '  {0}: {1}'.format(\
+    if ent_type == 'meaning':
+        term_text = '    {0}: {1}'.format(\
                 FMT.index(str(index)),  term_text)
     ret.append(term_text)
     entries = ent.get('entries', [])
@@ -198,8 +222,10 @@ def format_output(dfn):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
-        for w in sys.argv[1:]:
-            print_def(w)
+        if '--less' in sys.argv:
+            os.system('python dict.py %s | less -r'% sys.argv[1])
+        else:
+            print_def(sys.argv[1])
 
     else :
         while True:
