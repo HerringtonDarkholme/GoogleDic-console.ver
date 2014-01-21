@@ -6,18 +6,20 @@
 from __future__ import print_function
 from __future__ import unicode_literals
 import sys
-import os
+from os import system
 from argparse import ArgumentParser, SUPPRESS
 import re
 from textwrap import fill
 from urllib2 import urlopen, URLError
 from ast import literal_eval
 reload(sys)
-#sys.setdefaultencoding('utf8')
+sys.setdefaultencoding('utf8')
 
 _COLOR = {
     # refrence  : http       : //en.wikipedia.org/wiki/ANSI_escape_code
+    'close'    : "\033[0m",
     'bold'      : "\033[1m",
+    'italic'      : "\033[3m",
     'underline' : "\033[4m",
     'blink'     : "\033[5m",
     'reverse'   : "\033[7m",
@@ -69,10 +71,10 @@ TERM_FORMAT = {
 
 class Fmt(object):
     """quick way for format"""
-    def __init__(self, **opts):
+    def __init__(self, opts=None):
         """options for format"""
         super(Fmt, self).__init__()
-        self.options = opts
+        self.options = opts or {}
 
     def __getattr__(self, color):
         opts = self.options
@@ -92,6 +94,19 @@ class Fmt(object):
         return len(text) - len(printable)
 
     @staticmethod
+    def escape_html(text):
+        """hard-coded for example"""
+        if text.find('<b>') != -1:
+            text = text.replace('<b>', _COLOR['bold'])
+            text = text.replace('</b>', _COLOR['close'])
+            text = text.replace('<em>', '[3m')
+            text = text.replace('</em>', '[0m[1m')
+        else:
+            text = text.replace('<em>', '[3m')
+            text = text.replace('</em>', '[0m')
+        return text
+
+    @staticmethod
     def wrap_list(lst, indent=4):
         """break long word for related"""
         index = len(lst) - 1
@@ -106,14 +121,22 @@ class Fmt(object):
 
 FMT = Fmt()
 
-def print_def(word):
+def print_def(word, less):
     """format definition of word
     """
+    print('Loading word definition')
     if not word:
         return
     definition = get_def(word)
     definition = format_output(definition)
-    print("Definition for %s:\n %s" % (word, definition))
+    definition = "Definition for %s:\n%s" % (word, definition)
+    if less:
+        ret = system('echo "%s" | less -r'% definition)
+        if ret != 0:
+            print('No less or echo support?')
+            exit(1)
+    else:
+        print(definition)
 
 
 def get_def(word):
@@ -149,8 +172,8 @@ def terms(term_list, ent_type):
         separator = '\n'
         for term in term_list:
             text = term['text']
-            text = re.sub(r'<em>(.*?)</em>', '\1', text)
-            text = re.sub(r'<i>(.*?)</i>', '\1', text)
+            text = re.sub(r'<b>(.*?)</b>', r'\1', text)
+            text = re.sub(r'<em>(.*?)</em>', r'\1', text)
             text = fill(text, subsequent_indent=' '*7)
             ret.append(FMT.meaning(text))
 
@@ -169,8 +192,7 @@ def terms(term_list, ent_type):
         repl = lambda t: FMT.highlight(t.group(1))
         for term in term_list:
             text = term['text']
-            text = re.sub(r'<em>(.*?)</em>', repl, text)
-            text = re.sub(r'<b>(.*?)</b>', '\1', text)
+            text = FMT.escape_html(text)
             text = ' '*8 + '%s %s' % (FMT.item('*'), text)
             width = 70 + FMT.unprint_cnt(text)
             # add max width for escaped width
@@ -213,25 +235,27 @@ def entry(ent, index=0):
     ent_type = ent.get('type', '')
     ret = []
     term_list = ent.get('terms', [])
-    term_text = None
+    term_text = ''
+    show = FMT.show
 
-    if FMT.show(ent_type):
+    if show(ent_type):
         term_text = terms(term_list, ent_type)
+        if ent_type == 'meaning':
+            term_text = '    {0}: {1}'.format(\
+                    FMT.index(str(index)),  term_text)
+        elif ent_type == 'synonym':
+            label = ent['labels'][0]['text']
+            ret.append('  '+FMT.synonym(label+': '))
 
-    if ent_type == 'meaning':
-        term_text = '    {0}: {1}'.format(\
-                FMT.index(str(index)),  term_text)
-    elif ent_type == 'synonym' and FMT.show('synonym'):
-        label = ent['labels'][0]['text']
-        ret.append('  '+FMT.synonym(label+': '))
-
-    if term_text is not None:
+    if len(term_text):
         ret.append(term_text)
     entries = ent.get('entries', [])
     for num, child in enumerate(entries):
         if ent_type == 'synonyms':
             child['type'] = 'synonym'
         ret.append(entry(child, num))
+    # filter unwanted
+    ret = filter(len, ret)
     return '\n'.join(ret)
 
 
@@ -252,35 +276,44 @@ def format_output(dfn):
 def main():
     '''pylint hurts'''
     parser = ArgumentParser(description='Google Dictionary in Console.')
-    parser.add_argument('-f', '--full',
-                        action='store_true', default=False)
-    parser.add_argument('-m', '--meaning',
-                        action='store_true', default=True)
-    parser.add_argument('-s', '--synonym',
-                        action='store_true', default=True)
-    parser.add_argument('-r', '--related', action='store_true')
-    parser.add_argument('-e', '--example', action='store_true')
-    parser.add_argument('--no-fmt', help='print definition without color')
-    parser.add_argument('--less', help='view with pager(require less)')
+    parser.add_argument('-m', '--meaning', action='store_true',
+                        default=SUPPRESS, help='basic definition')
+    parser.add_argument('-s', '--synonym', action='store_true',
+                        default=SUPPRESS, help='kinda Thesaurus')
+    parser.add_argument('-r', '--related', action='store_true',
+                        default=SUPPRESS, help='other tense, form')
+    parser.add_argument('-e', '--example', action='store_true',
+                        default=SUPPRESS, help='usage: sentence/phrase')
+    parser.add_argument('--no-fmt', action='store_true',
+                        help='print definition without color')
+    parser.add_argument('--less', action='store_true',
+                        help='view with pager(require less)')
     parser.add_argument('words', nargs='*')
+
+    global FMT
     args = parser.parse_args()
+    options = args.__dict__
+    default = {} # default: print all
+
+    if len(options) > 3:
+        for color in ('meaning', 'synonym', 'related', 'example'):
+            default[color] = color in options
+    # skip headword if only synonym
+    default['headword'] = not ('synonym' in options and len(options) == 4)
+
+    FMT = Fmt(default)
 
     if args.words:
-        if '--less' in sys.argv:
-            os.system('python dict.py %s | less -r'% sys.argv[1])
-        else:
-            print_def(sys.argv[1])
+        for word in args.words:
+            print_def(word, args.less)
 
     else :
-        '''
         while True:
             try:
-                print_def(raw_input('Enter word: \n'))
+                print_def(raw_input('Enter word: \n'), args.less)
             except (EOFError, KeyboardInterrupt):
                 print("Bye")
                 exit(0)
-        '''
-        print(args.__dict__)
 
 if __name__ == '__main__':
     main()
