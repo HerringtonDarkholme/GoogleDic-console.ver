@@ -1,2 +1,2 @@
 all:
-	python dict.py test
+	./dict test

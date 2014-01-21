@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+
 """
     simple google dictionary in python
 """
@@ -5,6 +7,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import sys
 import os
+from argparse import ArgumentParser
 import re
 from textwrap import fill
 from urllib2 import urlopen, URLError
@@ -81,7 +84,27 @@ class Fmt(object):
         return lambda text:\
                 '%s%s%s'% (TERM_FORMAT[color], text, TERM_FORMAT['close'])
 
-FMT = Fmt(**{})
+    _invisible = re.compile(r'\033\[\d+(;\d+)?m')
+    @classmethod
+    def unprint_cnt(cls, text):
+        """get count of printable"""
+        printable = cls._invisible.sub('', text)
+        return len(text) - len(printable)
+
+    @staticmethod
+    def wrap_list(lst, indent=4):
+        """break long word for related"""
+        index = len(lst) - 1
+        index -= index % 2
+        while index:
+            lst[index] = '\n' + ' '*indent + lst[index]
+            index -= 2
+
+    def hide(self, ent_type):
+        """whether entry type is not visible"""
+        return not self.options.get(ent_type, 1)
+
+FMT = Fmt()
 
 def print_def(word):
     """format definition of word
@@ -97,7 +120,7 @@ def get_def(word):
     """get definition from google dictionary api
     """
     goo_dict = 'http://www.google.com/dictionary/json'
-    goo_dict += '?callback=s&q={query}&sl=en&tl=en&restrict=pr,de&client=te'
+    goo_dict += '?callback=s&q={query}&sl=en&tl=en&restrict=pr,de,sy&client=te'
     url = goo_dict.format(query=word)
     definition = ''
     try:
@@ -139,8 +162,7 @@ def terms(term_list, ent_type):
             text = '%s %s'% (term['text'], FMT.related(label))
             ret.append(text)
         ret[0] = '    ' + ret[0]
-        if len(ret) > 2: #break long
-            ret[2] = '\n    ' + ret[2]
+        FMT.wrap_list(ret)
 
     elif ent_type == 'example':
         separator = '\n'
@@ -150,8 +172,9 @@ def terms(term_list, ent_type):
             text = re.sub(r'<em>(.*?)</em>', repl, text)
             text = re.sub(r'<b>(.*?)</b>', '\1', text)
             text = ' '*8 + '%s %s' % (FMT.item('*'), text)
+            width = 70 + FMT.unprint_cnt(text)
             # add max width for escaped width
-            text = fill(text, width = 90, \
+            text = fill(text, width = width, \
                     subsequent_indent=' '*10)
             ret.append(text)
 
@@ -170,6 +193,7 @@ def terms(term_list, ent_type):
     elif ent_type == 'synonym':
         separator = ', '
         ret = [term['text'] for term in term_list]
+        ret[0] = '  ' + ret[0]
 
     return separator.join(ret)
 
@@ -186,18 +210,20 @@ def entry(ent, index=0):
                 [labels]: <dict>
         'entries': <entry_list>
     """
-    ret = []
     ent_type = ent.get('type', '')
+    if FMT.hide(ent_type):
+        return ''
+    ret = []
     term_list = ent.get('terms', [])
     term_text = terms(term_list, ent_type)
     if ent_type == 'meaning':
         term_text = '    {0}: {1}'.format(\
                 FMT.index(str(index)),  term_text)
+    elif ent_type == 'synonym':
+        label = ent['labels'][0]['text']
+        ret.append('  '+FMT.synonym(label+': '))
     ret.append(term_text)
     entries = ent.get('entries', [])
-    if ent_type == 'synonym':
-        label = ent['labels'][0]['text']
-        ret.append(FMT.synonym(label+': '))
     for num, child in enumerate(entries):
         if ent_type == 'synonyms':
             child['type'] = 'synonym'
@@ -212,7 +238,7 @@ def format_output(dfn):
     ret = []
     if 'synonyms' in dfn:
         for ent in dfn['synonyms']:
-            ent['type'] = 'synonym'
+            ent['type'] = 'synonyms'
             ret.append(entry(ent))
     if 'primaries' in dfn:
         ret.extend([entry(ent) for ent in dfn['primaries']])
