@@ -9,8 +9,9 @@ import sys
 from os import system
 from argparse import ArgumentParser, SUPPRESS
 import re
+from spell_checker import correct
 from textwrap import fill
-from urllib2 import urlopen, URLError
+from urllib2 import urlopen, URLError, quote
 from ast import literal_eval
 reload(sys)
 sys.setdefaultencoding('utf8')
@@ -121,7 +122,7 @@ class Fmt(object):
 
 FMT = Fmt()
 
-def print_def(word, less):
+def print_def(word, less, checker):
     """format definition of word
     """
     print('Loading word definition')
@@ -129,6 +130,11 @@ def print_def(word, less):
         return
     definition = get_def(word)
     definition = format_output(definition)
+    if definition == '':
+        print('No Definition found!')
+        if checker:
+            select_correction(word, less, checker)
+        return
     definition = "Definition for %s:\n%s" % (word, definition)
     if less:
         ret = system('echo "%s" | less -r'% definition)
@@ -138,12 +144,29 @@ def print_def(word, less):
     else:
         print(definition)
 
+def select_correction(word, less, checker):
+    """interactive correction"""
+    cand = list(correct(word))[:10]
+    if not cand:
+        return
+    sel = ('[%d] %s' % ((i+1)%10, c) for i, c in enumerate(cand))
+    sel = ' '.join(sel)
+    print('Did you mean:')
+    print(fill(sel))
+    i = raw_input('Press candidate number, or other keys: ')
+    if (not i.isdigit()):
+        return
+    i = int(i)
+    if i >= len(cand) or i < 0:
+        return
+    print_def(cand[(i+1)%10], less, checker)
 
 def get_def(word):
     """get definition from google dictionary api
     """
     goo_dict = 'http://www.google.com/dictionary/json'
     goo_dict += '?callback=s&q={query}&sl=en&tl=en&restrict=pr,de,sy&client=te'
+    word = quote(word)
     url = goo_dict.format(query=word)
     definition = ''
     try:
@@ -189,7 +212,6 @@ def terms(term_list, ent_type):
 
     elif ent_type == 'example':
         separator = '\n'
-        repl = lambda t: FMT.highlight(t.group(1))
         for term in term_list:
             text = term['text']
             text = FMT.escape_html(text)
@@ -255,7 +277,7 @@ def entry(ent, index=0):
             child['type'] = 'synonym'
         ret.append(entry(child, num))
     # filter unwanted
-    ret = filter(len, ret)
+    ret = [t for t in ret if len(t)]
     return '\n'.join(ret)
 
 
@@ -286,8 +308,10 @@ def main():
                         default=SUPPRESS, help='usage: sentence/phrase')
     parser.add_argument('--no-fmt', action='store_true',
                         help='print definition without color')
-    parser.add_argument('--less', action='store_true',
+    parser.add_argument('-l', '--less', action='store_true',
                         help='view with pager(require less)')
+    parser.add_argument('-c', '--checker', action='store_true',
+                        help='spell correction if no definition')
     parser.add_argument('words', nargs='*')
 
     global FMT
@@ -295,22 +319,22 @@ def main():
     options = args.__dict__
     default = {} # default: print all
 
-    if len(options) > 3:
+    if len(options) > 4:
         for color in ('meaning', 'synonym', 'related', 'example'):
             default[color] = color in options
     # skip headword if only synonym
-    default['headword'] = not ('synonym' in options and len(options) == 4)
+    default['headword'] = not ('synonym' in options and len(options) == 5)
 
     FMT = Fmt(default)
 
     if args.words:
         for word in args.words:
-            print_def(word, args.less)
+            print_def(word, args.less, args.checker)
 
     else :
         while True:
             try:
-                print_def(raw_input('Enter word: \n'), args.less)
+                print_def(raw_input('Enter word: \n'), args.less, args.checker)
             except (EOFError, KeyboardInterrupt):
                 print("Bye")
                 exit(0)
