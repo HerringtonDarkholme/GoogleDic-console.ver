@@ -159,7 +159,7 @@ def select_correction(word, less, checker):
     i = int(i)
     if i >= len(cand) or i < 0:
         return
-    print_def(cand[(i+1)%10], less, checker)
+    print_def(cand[(i+9)%10], less, checker)
 
 def get_def(word):
     """get definition from google dictionary api
@@ -316,7 +316,7 @@ def main():
 
     global FMT
     args = parser.parse_args()
-    options = args.__dict__
+    options = vars(args)
     default = {} # default: print all
 
     if len(options) > 4:
